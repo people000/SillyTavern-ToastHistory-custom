@@ -15,30 +15,93 @@ const init = ()=>{
     /**@type {{level:string, message:string|JQuery, title:string, options:ToastrOptions, toast:HTMLElement, timestamp:Date}[]} */
     const history = [];
 
-       const openToastHistoryPopup = async () => {
+    const updateHideButtonAppearance = (button, isSuppressed) => {
+        if (isSuppressed) {
+            button.classList.remove('fa-ban');
+            button.classList.add('fa-eye');
+            button.title = 'Click to allow this toast\nLong-press to delete permanently';
+        } else {
+            button.classList.remove('fa-eye');
+            button.classList.add('fa-ban');
+            button.title = 'Click to suppress this toast\nLong-press to delete permanently';
+        }
+    };
+
+    const createBlockListElement = () => {
+        const dom = document.createElement('div');
+        dom.classList.add('stth--hideListDlg');
+        const tbl = document.createElement('table');
+        const thead = document.createElement('thead');
+        const tr = document.createElement('tr');
+        for (const col of ['Severity', 'Message', '']) {
+            const th = document.createElement('th');
+            th.textContent = col;
+            tr.append(th);
+        }
+        thead.append(tr);
+        tbl.append(thead);
+
+        const tbody = document.createElement('tbody');
+        for (const item of settings.hideList) {
+            const tr = document.createElement('tr');
+            const sev = document.createElement('td');
+            sev.textContent = item.level;
+            tr.append(sev);
+            const mes = document.createElement('td');
+            const wrap = document.createElement('div');
+            wrap.classList.add('toast-message');
+            wrap.innerHTML = item.textContent;
+            mes.append(wrap);
+            tr.append(mes);
+
+            const actions = document.createElement('td');
+            const del = document.createElement('div');
+            del.classList.add('menu_button', 'fa-solid', 'fa-fw', 'fa-trash-can');
+            del.title = 'Remove item from block list';
+            del.addEventListener('click', () => {
+                const idx = settings.hideList.indexOf(item);
+                if (idx > -1) {
+                    settings.hideList.splice(idx, 1);
+                    settings.save();
+                }
+                tr.remove();
+            });
+            actions.append(del);
+            tr.append(actions);
+            tbody.append(tr);
+        }
+        tbl.append(tbody);
+        dom.append(tbl);
+        return dom;
+    };
+
+
+    const openToastHistoryPopup = async () => {
         try {
             const template = $(await renderExtensionTemplateAsync(`third-party/${extensionName}`, 'template'));
             const dom = template;
-            
-            // [수정] 이제 알림 목록은 '.stth-history-list' 안에 채워집니다.
+
             const historyList = dom.find('.stth-history-list');
             historyList.addClass('stth--history');
 
-            if (history.length === 0) {
+            const showEmptyMessage = () => {
+                historyList.empty();
                 const noHistoryMessage = document.createElement('div');
                 noHistoryMessage.textContent = 'No recent notifications.';
                 noHistoryMessage.style.textAlign = 'center';
                 noHistoryMessage.style.padding = '20px';
                 historyList.append(noHistoryMessage);
+            };
+
+            if (history.length === 0) {
+                showEmptyMessage();
             } else {
-                for (const item of history.toReversed()) {
+                 for (const item of history.toReversed()) {
                     const wrap = document.createElement('div'); {
                         wrap.classList.add('stth--item');
-                        wrap.dataset.level = item.level; // <-- 필터링을 위해 종류를 저장해 둡니다.
+                        wrap.dataset.level = item.level;
                         const toast = /**@type {HTMLElement}*/(item.toast.cloneNode(true)); {
-                          
-                          toast.style.opacity = 1;
-                          
+                            toast.style.opacity = 1;
                             wrap.dataset.textContent = toast.querySelector('.toast-message').innerHTML;
                             
                             const ts = document.createElement('div'); {
@@ -48,35 +111,81 @@ const init = ()=>{
                             }
                             wrap.append(toast);
                         }
-                        if (settings.hideList.find(it=>it.level == wrap.dataset.level && it.textContent == wrap.dataset.textContent)) {
+                        
+                        const isSuppressed = !!settings.hideList.find(it=>it.level == wrap.dataset.level && it.textContent == wrap.dataset.textContent);
+                        if (isSuppressed) {
                             wrap.classList.add('stth--isSuppressed');
                         }
+
                         const actions = document.createElement('div'); {
                             actions.classList.add('stth--actions');
                             const hide = document.createElement('div'); {
-                                hide.classList.add('stth--action', 'stth--hide', 'menu_button', 'fa-solid', 'fa-fw', 'fa-ban');
-                                hide.title = 'Suppress this toast\n---\nToasts with the same severity and message will no longer show up in the Toast History';
-                                hide.addEventListener('click', ()=>{
-                                    const is = wrap.classList.toggle('stth--isSuppressed');
-                                    const same = /**@type {HTMLElement[]}*/([...historyList.children()]).filter(it=>it.dataset.level == item.level && it.dataset.textContent == item.toast.textContent);
-                                    for (const el of same) { el.classList[is ? 'add' : 'remove']('stth--isSuppressed'); }
-                                    if (is) {
-                                        settings.hideList.push({ textContent:item.toast.querySelector('.toast-message').innerHTML, level:item.level });
-                                    } else {
-                                        const idx = settings.hideList.findIndex(it=>it.textContent == item.toast.querySelector('.toast-message').innerHTML && it.level == item.level);
-                                        if (idx > -1) { settings.hideList.splice(idx, 1); }
+                                hide.classList.add('stth--action', 'stth--hide', 'menu_button', 'fa-solid', 'fa-fw');
+                                updateHideButtonAppearance(hide, isSuppressed);
+
+                                let pressTimer = null;
+                                let isLongPress = false;
+
+                                const onPointerDown = (event) => {
+                                    // 터치 이벤트의 경우, 뒤따라오는 마우스 이벤트를 막습니다.
+                                    if (event.type === 'touchstart') {
+                                        event.preventDefault();
                                     }
-                                    settings.save();
-                                });
+                                    isLongPress = false;
+                                    pressTimer = setTimeout(() => {
+                                        isLongPress = true;
+                                        const idx = history.indexOf(item);
+                                        if (idx > -1) {
+                                            history.splice(idx, 1);
+                                        }
+                                        wrap.remove();
+                                        if (history.length === 0) {
+                                            showEmptyMessage();
+                                        }
+                                    }, 500);
+                                };
+
+                                const onPointerUp = (event) => {
+                                    if (event.type === 'touchend') {
+                                        event.preventDefault();
+                                    }
+                                    clearTimeout(pressTimer);
+                                    if (!isLongPress) {
+                                        // 짧게 누르기 액션
+                                        const isNowSuppressed = wrap.classList.toggle('stth--isSuppressed');
+                                        updateHideButtonAppearance(hide, isNowSuppressed);
+
+                                        const same = /**@type {HTMLElement[]}*/([...historyList.children()]).filter(it=>it.dataset.level == item.level && it.dataset.textContent == item.toast.textContent);
+                                        for (const el of same) { 
+                                            el.classList[isNowSuppressed ? 'add' : 'remove']('stth--isSuppressed');
+                                            const otherHideButton = el.querySelector('.stth--hide');
+                                            if (otherHideButton) {
+                                                updateHideButtonAppearance(otherHideButton, isNowSuppressed);
+                                            }
+                                        }
+
+                                        if (isNowSuppressed) {
+                                            settings.hideList.push({ textContent:item.toast.querySelector('.toast-message').innerHTML, level:item.level });
+                                        } else {
+                                            const idx = settings.hideList.findIndex(it=>it.textContent == item.toast.querySelector('.toast-message').innerHTML && it.level == item.level);
+                                            if (idx > -1) { settings.hideList.splice(idx, 1); }
+                                        }
+                                        settings.save();
+                                    }
+                                };
+                                
+                                hide.addEventListener('mousedown', onPointerDown);
+                                hide.addEventListener('touchstart', onPointerDown);
+                                hide.addEventListener('mouseup', onPointerUp);
+                                hide.addEventListener('touchend', onPointerUp);
+                                hide.addEventListener('mouseleave', () => clearTimeout(pressTimer));
+
                                 actions.append(hide);
                             }
+
                             if (item.options?.onclick) {
-                                const click = document.createElement('div'); {
-                                    click.classList.add('stth--action', 'stth--click', 'menu_button', 'fa-solid', 'fa-fw', 'fa-shake', 'fa-hand-pointer');
-                                    click.title = 'This toast will do something if you click it!';
-                                    click.addEventListener('click', ()=>$(toast).trigger('click'));
-                                    actions.append(click);
-                                }
+                                toast.classList.add('stth--hasListener');
+                                toast.addEventListener('click', item.options.onclick);
                             }
                             wrap.append(actions);
                         }
@@ -84,27 +193,39 @@ const init = ()=>{
                     }
                 }
             }
+            
+            const mainTabs = dom.find('.stth-main-tabs button');
+            const viewContainers = dom.find('.stth-view-container');
+            const blockedListContainer = dom.find('.stth-blocked-list');
 
-            // [추가!] 탭 버튼에 클릭 이벤트를 추가하는 로직입니다.
-            const tabs = dom.find('.stth-tabs button');
-            const items = historyList.find('.stth--item');
-            tabs.on('click', function() {
-                const level = $(this).data('level');
-
-                // 모든 탭의 'active' 스타일을 제거하고, 클릭된 탭에만 추가합니다.
-                tabs.removeClass('active');
+            mainTabs.on('click', function() {
+                const viewName = $(this).data('view');
+                mainTabs.removeClass('active');
                 $(this).addClass('active');
+                viewContainers.hide();
 
-                // 모든 알림 목록을 순회하면서 필터링합니다.
+                const targetView = viewContainers.filter(`[data-view-name="${viewName}"]`);
+                targetView.show();
+                
+                if (viewName === 'blocked') {
+                    blockedListContainer.empty().append(createBlockListElement());
+                }
+            });
+
+            const subTabs = dom.find('.stth-tabs button');
+            const items = historyList.find('.stth--item');
+            subTabs.on('click', function() {
+                const level = $(this).data('level');
+                subTabs.removeClass('active');
+                $(this).addClass('active');
                 items.each(function() {
                     if (level === 'all' || $(this).data('level') === level) {
-                        $(this).css('display', 'flex'); // 보이기
+                        $(this).css('display', 'flex');
                     } else {
-                        $(this).css('display', 'none');  // 숨기기
+                        $(this).css('display', 'none');
                     }
                 });
             });
-
 
             const dlg = new Popup(template, POPUP_TYPE.TEXT, 'Toast History', {
                 okButton: 'Clear',
@@ -112,8 +233,9 @@ const init = ()=>{
                 allowVerticalScrolling: true,
                 wider: true,
             });
+            
             const result = await dlg.show();
-            if (result == POPUP_RESULT.AFFIRMATIVE) {
+            if (result === POPUP_RESULT.AFFIRMATIVE) {
                 history.length = 0;
             }
 
@@ -138,7 +260,6 @@ const init = ()=>{
         }
     };
 
-    // 원래 코드의 '알림 가로채기' 로직
     const levels = {
         'info': { count: 0, dom: undefined },
         'success': { count: 0, dom: undefined },
@@ -146,7 +267,6 @@ const init = ()=>{
         'error': { count: 0, dom: undefined },
     };
     for (const level of Object.keys(levels)) {
-        /**@type {(message:string|JQuery, title?:string, overrides?:ToastrOptions)=>JQuery<HTMLElement>} */
         const original = toastr[level].bind(toastr);
         toastr[level] = (message, title, options)=>{
             const toast = original(message, title, options);
@@ -157,57 +277,12 @@ const init = ()=>{
         };
     }
 
-    // 마술봉 메뉴에 버튼 추가
     addToWandMenu();
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'toasthistory-blocks',
         callback: (args, value)=>{
-            const dom = document.createElement('div'); {
-                dom.classList.add('stth--hideListDlg');
-                const tbl = document.createElement('table'); {
-                    const thead = document.createElement('thead'); {
-                        const tr = document.createElement('tr'); {
-                            for (const col of ['Severity', 'Message', '']) {
-                                const th = document.createElement('th'); { th.textContent = col; tr.append(th); }
-                            }
-                            thead.append(tr);
-                        }
-                        tbl.append(thead);
-                    }
-                    const tbody = document.createElement('tbody'); {
-                        for (const item of settings.hideList) {
-                            const tr = document.createElement('tr'); {
-                                const sev = document.createElement('td'); { sev.textContent = item.level; tr.append(sev); }
-                                const mes = document.createElement('td'); {
-                                    const wrap = document.createElement('div'); {
-                                        wrap.classList.add('toast-message');
-                                        wrap.innerHTML = item.textContent;
-                                        mes.append(wrap);
-                                    }
-                                    tr.append(mes);
-                                }
-                                const actions = document.createElement('td'); {
-                                    const del = document.createElement('div'); {
-                                        del.classList.add('menu_button', 'fa-solid', 'fa-fw', 'fa-trash-can');
-                                        del.title = 'Remove item from block list';
-                                        del.addEventListener('click', ()=>{
-                                            const idx = settings.hideList.indexOf(item);
-                                            if (idx > -1) { settings.hideList.splice(idx, 1); settings.save(); }
-                                            tr.remove();
-                                        });
-                                        actions.append(del);
-                                    }
-                                    tr.append(actions);
-                                }
-                                tbody.append(tr);
-                            }
-                        }
-                        tbl.append(tbody);
-                    }
-                    dom.append(tbl);
-                }
-            }
-            const dlg = new Popup(dom, POPUP_TYPE.TEXT, null, { wider: true });
+            const blockListElement = createBlockListElement();
+            const dlg = new Popup(blockListElement, POPUP_TYPE.TEXT, "Blocked Toasts", { wider: true, cancelButton: 'Close' });
             dlg.show();
             return '';
         },
