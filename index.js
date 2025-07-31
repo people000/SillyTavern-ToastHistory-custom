@@ -36,6 +36,9 @@ const init = ()=>{
                         wrap.classList.add('stth--item');
                         wrap.dataset.level = item.level; // <-- 필터링을 위해 종류를 저장해 둡니다.
                         const toast = /**@type {HTMLElement}*/(item.toast.cloneNode(true)); {
+                          
+                          toast.style.opacity = 1;
+                          
                             wrap.dataset.textContent = toast.querySelector('.toast-message').innerHTML;
                             
                             const ts = document.createElement('div'); {
