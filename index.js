@@ -93,6 +93,7 @@ const init = ()=>{
                 historyList.append(noHistoryMessage);
             };
 
+
             if (history.length === 0) {
                 showEmptyMessage();
             } else {
@@ -127,7 +128,6 @@ const init = ()=>{
                                 let isLongPress = false;
 
                                 const onPointerDown = (event) => {
-                                    // 터치 이벤트의 경우, 뒤따라오는 마우스 이벤트를 막습니다.
                                     if (event.type === 'touchstart') {
                                         event.preventDefault();
                                     }
@@ -151,7 +151,6 @@ const init = ()=>{
                                     }
                                     clearTimeout(pressTimer);
                                     if (!isLongPress) {
-                                        // 짧게 누르기 액션
                                         const isNowSuppressed = wrap.classList.toggle('stth--isSuppressed');
                                         updateHideButtonAppearance(hide, isNowSuppressed);
 
@@ -194,7 +193,8 @@ const init = ()=>{
                 }
             }
             
-            const mainTabs = dom.find('.stth-main-tabs button');
+            const mainTabsContainer = dom.find('.stth-main-tabs');
+            const mainTabs = mainTabsContainer.find('button');
             const viewContainers = dom.find('.stth-view-container');
             const blockedListContainer = dom.find('.stth-blocked-list');
 
@@ -212,6 +212,26 @@ const init = ()=>{
                 }
             });
 
+            // ✅ '아주 작게' : 텍스트 버튼 대신 휴지통 아이콘으로 교체
+            const clearIcon = $('<div title="모두 지우기"></div>');
+            clearIcon.addClass('menu_button fa-solid fa-trash-can'); // SillyTavern 기본 아이콘 스타일 적용
+            
+            clearIcon.css({
+                'margin-left': 'auto', // 오른쪽 끝으로 밀어내기
+                'align-self': 'center', // 탭과 수직 중앙 정렬
+                'font-size': '1.2em', // 아이콘 크기
+                'cursor': 'pointer'
+            });
+
+            clearIcon.on('click', (event) => {
+                event.stopPropagation();
+                history.length = 0;
+                showEmptyMessage();
+            });
+
+            mainTabsContainer.append(clearIcon);
+
+
             const subTabs = dom.find('.stth-tabs button');
             const items = historyList.find('.stth--item');
             subTabs.on('click', function() {
@@ -226,18 +246,15 @@ const init = ()=>{
                     }
                 });
             });
-
+            
             const dlg = new Popup(template, POPUP_TYPE.TEXT, 'Toast History', {
-                okButton: 'Clear',
-                cancelButton: 'Close',
+                okButton: 'OK',
+                cancelButton: false,
                 allowVerticalScrolling: true,
                 wider: true,
             });
             
-            const result = await dlg.show();
-            if (result === POPUP_RESULT.AFFIRMATIVE) {
-                history.length = 0;
-            }
+            await dlg.show();
 
         } catch (error) {
             console.error("Toast History: Error opening popup", error);
